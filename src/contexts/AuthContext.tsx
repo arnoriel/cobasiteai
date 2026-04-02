@@ -50,32 +50,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
+  const timeout = setTimeout(() => setLoading(false), 8000); // safety net
+
+  supabase.auth.getSession().then(async ({ data: { session } }) => {
+    setSession(session);
+    setUser(session?.user ?? null);
+    if (session?.user) {
+      try {
         const p = await fetchProfile(session.user.id);
         setProfile(p);
+      } catch (e) {
+        console.error('fetchProfile error:', e);
       }
-      setLoading(false);
-    });
+    }
+    clearTimeout(timeout);
+    setLoading(false); // ← sekarang pasti dipanggil
+  }).catch((e) => {
+    console.error('getSession error:', e);
+    clearTimeout(timeout);
+    setLoading(false);
+  });
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
+  const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    setSession(session);
+    setUser(session?.user ?? null);
+    if (session?.user) {
+      try {
         const p = await fetchProfile(session.user.id);
         setProfile(p);
-      } else {
-        setProfile(null);
+      } catch (e) {
+        console.error('fetchProfile onAuthChange error:', e);
       }
-      setLoading(false);
-    });
+    } else {
+      setProfile(null);
+    }
+    setLoading(false);
+  });
 
-    return () => subscription.unsubscribe();
-  }, []);
+  return () => {
+    clearTimeout(timeout);
+    subscription.unsubscribe();
+  };
+}, []);
 
   const signInWithGoogle = async () => {
     await supabase.auth.signInWithOAuth({
