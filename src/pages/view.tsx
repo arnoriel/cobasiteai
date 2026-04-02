@@ -12,12 +12,14 @@ import {
   Link,
   Check,
 } from 'lucide-react';
-import { storage } from '../lib/storage';
+import { dbStorage } from '../lib/dbStorage'; // ✅ FIX: was `storage` (localStorage)
+import { useAuth } from '../contexts/AuthContext';
 import type { Website } from '../types';
 
 export default function ViewPage() {
   const { id, page_name } = useParams<{ id: string; page_name: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth(); // ✅ FIX: butuh userId untuk dbStorage.getById
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [website, setWebsite] = useState<Website | null>(null);
@@ -26,14 +28,24 @@ export default function ViewPage() {
   const [bannerVisible, setBannerVisible] = useState(true);
   const [copied, setCopied] = useState(false);
 
+  // ✅ FIX: ganti storage.getById (sync localStorage) → dbStorage.getById (async Supabase)
   useEffect(() => {
-    if (!id) { setNotFound(true); return; }
-    const site = storage.getById(id);
-    if (!site) { setNotFound(true); return; }
-    if (!site.page_name) { setNotFound(true); return; }
-    // Allow viewing regardless of page_name match — the URL is already correct
-    setWebsite(site);
-  }, [id, page_name]);
+    if (!id || !user) return;
+
+    dbStorage.getById(id, user.id).then((site) => {
+      if (!site) {
+        setNotFound(true);
+        return;
+      }
+      if (!site.page_name) {
+        setNotFound(true);
+        return;
+      }
+      setWebsite(site);
+    }).catch(() => {
+      setNotFound(true);
+    });
+  }, [id, user]);
 
   // Write HTML into iframe once we have the website
   useEffect(() => {
@@ -50,45 +62,26 @@ export default function ViewPage() {
 
   const goToPreview = () => navigate(`/websites/${id}/preview`);
 
-  /**
-   * Build the canonical shareable URL for this page.
-   * Format: {origin}/page/{page_name}
-   * This URL must be handled by the router (e.g. /page/:page_name → ViewPage lookup by page_name).
-   */
   const getShareableUrl = () => {
     if (!website?.page_name) return null;
     return `${window.location.origin}/page/${website.page_name}`;
   };
 
-  /**
-   * Open the page standalone in a new tab.
-   * We inject a small script into the HTML so the standalone window's address bar
-   * shows the shareable URL ({origin}/page/{page_name}) via history.replaceState.
-   * This means anyone copying the address bar URL will get the correct shareable link.
-   */
   const openStandalone = () => {
     if (!website?.source_code || !website.page_name) return;
 
     const shareableUrl = getShareableUrl();
 
-    // Inject a script at the very beginning of <head> (or before anything else)
-    // that replaces the blob: URL in the address bar with the real shareable URL.
     const injectScript = shareableUrl
-      ? `<script>
-try {
-  window.history.replaceState(null, '', ${JSON.stringify(shareableUrl)});
-} catch(e) {}
-</script>`
+      ? `<script>\ntry {\n  window.history.replaceState(null, '', ${JSON.stringify(shareableUrl)});\n} catch(e) {}\n</script>`
       : '';
 
-    // Insert inject script right after <head> (or prepend if no <head>)
     let html = website.source_code;
     if (html.includes('<head>')) {
       html = html.replace('<head>', `<head>${injectScript}`);
     } else if (html.includes('<HEAD>')) {
       html = html.replace('<HEAD>', `<HEAD>${injectScript}`);
     } else {
-      // No head tag, prepend to the document
       html = injectScript + html;
     }
 
@@ -96,10 +89,6 @@ try {
     window.open(URL.createObjectURL(blob), '_blank');
   };
 
-  /**
-   * Copy the shareable URL to clipboard.
-   * Format: {origin}/page/{page_name}
-   */
   const copyShareableLink = async () => {
     const url = getShareableUrl();
     if (!url) return;
@@ -108,7 +97,6 @@ try {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
-      // Fallback: select a temp input
       const input = document.createElement('input');
       input.value = url;
       document.body.appendChild(input);
@@ -143,6 +131,18 @@ try {
           <ArrowLeft size={14} />
           Back to CobasiteAI
         </button>
+      </div>
+    );
+  }
+
+  // ── Loading state (waiting for Supabase fetch) ──────────────
+  if (!website && !notFound) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-base">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
+          <p className="text-xs text-zinc-400">Loading page…</p>
+        </div>
       </div>
     );
   }
@@ -187,7 +187,6 @@ try {
             </p>
 
             <div className="flex items-center gap-1 flex-shrink-0">
-              {/* Copy shareable link button */}
               <button
                 onClick={copyShareableLink}
                 className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-base-100 hover:bg-base-200 text-text-muted hover:text-text-primary text-xs transition-colors border border-surface-border"
