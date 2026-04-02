@@ -8,7 +8,6 @@ import StreamingOutput from '../components/StreamingOutput';
 import CreditsBadge from '../components/CreditsBadge';
 import UserMenu from '../components/UserMenu';
 import type { Website, GenerationStatus } from '../types';
-import { ENV } from '../lib/env';
 import { dbStorage } from '../lib/dbStorage';
 import { generateWebsite, extractWebsiteName } from '../lib/ai';
 import { useAuth } from '../contexts/AuthContext';
@@ -149,7 +148,6 @@ export default function Home() {
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2 text-xs text-text-muted">
               <Zap size={11} className="text-accent-glow" />
-              <span>{ENV.model}</span>
             </div>
             <CreditsBadge />
             <UserMenu />
